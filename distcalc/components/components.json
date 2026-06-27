@@ -1,0 +1,77 @@
+{
+  "_comment": "Component database for PR-EOS distillation calculator. Fixed, version-pinned. DO NOT edit without updating version.",
+  "_version": "1.0.0",
+  "_Tref_K": 298.15,
+  "_Href_J_per_mol": 0.0,
+  "components": [
+    {
+      "name": "Nitrogen",
+      "formula": "N2",
+      "CAS": "7727-37-9",
+      "MW": 0.028014,
+      "Tc": 126.19,
+      "Pc": 3395800.0,
+      "omega": 0.0372,
+      "shomate": [
+        {
+          "Tmin": 63.0,
+          "Tmax": 2000.0,
+          "A": 28.98641,
+          "B": 1.853978,
+          "C": -9.647574,
+          "D": 16.63537,
+          "E": 0.000117
+        }
+      ]
+    },
+    {
+      "name": "Oxygen",
+      "formula": "O2",
+      "CAS": "7782-44-7",
+      "MW": 0.031999,
+      "Tc": 154.58,
+      "Pc": 5043000.0,
+      "omega": 0.0222,
+      "shomate": [
+        {
+          "Tmin": 54.0,
+          "Tmax": 2000.0,
+          "A": 31.32234,
+          "B": -20.23531,
+          "C": 57.86644,
+          "D": -36.50624,
+          "E": -0.007374
+        }
+      ]
+    },
+    {
+      "name": "Argon",
+      "formula": "Ar",
+      "CAS": "7440-37-1",
+      "MW": 0.039948,
+      "Tc": 150.86,
+      "Pc": 4898000.0,
+      "omega": -0.0022,
+      "shomate": [
+        {
+          "Tmin": 40.0,
+          "Tmax": 6000.0,
+          "A": 20.78600,
+          "B": 0.0,
+          "C": 0.0,
+          "D": 0.0,
+          "E": 0.0
+        }
+      ]
+    }
+  ],
+  "Kij": {
+    "citation": "Binary interaction parameters for PR-EOS vdW one-fluid mixing rules. Fitted to cryogenic VLE data. k(N2,O2)=-0.0119 from Rowlinson (1969) adapted for PR; k(N2,Ar)=-0.0026, k(O2,Ar)=0.0104 consistent with Poling, Prausnitz, O'Connell, The Properties of Gases and Liquids 5th ed. (2001) App.B and multiple ASU simulation studies (e.g. Thorogood 1991, Xu et al. 2014).",
+    "names": ["N2", "O2", "Ar"],
+    "matrix": [
+      [ 0.0,    -0.0119, -0.0026],
+      [-0.0119,  0.0,     0.0104],
+      [-0.0026,  0.0104,  0.0   ]
+    ]
+  }
+}
