@@ -196,7 +196,8 @@ class TestASUTernary:
             z_air=np.array([0.7812, 0.2096, 0.0092]),
             N_lower=12,
             N_upper=20,
-            N_argon=12,
+            N_argon=15,        # real default is 170; keep small for CI speed
+            D_frac_argon=0.12, # most of the crude Ar draw is O2 → goes to bottoms
             max_outer_iter=3,
         )
 
@@ -213,7 +214,7 @@ class TestASUTernary:
         cfg = ASUConfig(**self._fast_cfg())
         res = solve_asu(cfg, mix_n2o2ar)
         assert res.argon_col is not None, "Argon column result not populated"
-        assert res.argon_col.x.shape == (3, 12)
+        assert res.argon_col.x.shape == (3, 15)
 
     def test_n2_o2_separation(self, mix_n2o2ar):
         """Upper column N2 in distillate > N2 in bottoms (qualitative separation)."""

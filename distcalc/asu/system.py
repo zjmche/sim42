@@ -119,6 +119,7 @@ def _build_upper_config(
     ar_draw_flow: float,
     ar_draw_stage: int,
     mix: Mixture,
+    ar_bottoms_recycle: "StreamSpec | None" = None,
 ) -> MultiColumnConfig:
     """Build the MultiColumnConfig for the LP upper column."""
     N  = cfg.N_upper
@@ -152,22 +153,36 @@ def _build_upper_config(
         q=0.95,   # mostly liquid after J-T expansion
     )
 
+    # Build feed list; optionally include O2-rich Ar-column bottoms recycle
+    feeds: list[FeedSpec] = [feed_n2, feed_co2]
+    if ar_bottoms_recycle is not None and ar_draw_stage > 0:
+        recycle_stage = min(ar_draw_stage, cfg.N_upper)
+        feed_recycle = FeedSpec(
+            stage=recycle_stage,
+            flow=ar_bottoms_recycle.flow,
+            z=ar_bottoms_recycle.z.copy(),
+            T=ar_bottoms_recycle.T,
+            P=P,
+            q=1.0,
+        )
+        feeds.append(feed_recycle)
+
     side_draws = (
         [SideDraw(stage=ar_draw_stage, flow=ar_draw_flow)]
         if ar_draw_flow > 0 and ar_draw_stage > 0
         else []
     )
 
-    B_upper = cfg.air_flow - D_upper - ar_draw_flow
-
+    # B is auto-computed from mass balance: total_feed - D_upper - side_draw_total
+    # When recycle is included: B = air_flow + B_ar - D_upper - ar_draw_flow
+    #                             = air_flow - D_upper - D_ar_product  (correct)
     return MultiColumnConfig(
         N_stages=N,
-        feeds=[feed_n2, feed_co2],
+        feeds=feeds,
         P_profile=np.full(N, P),
         condenser_type="total",
         distillate_rate=D_upper,
         reflux_ratio=cfg.RR_upper,
-        bottoms_rate=max(B_upper, 1e-6),
         side_draws=side_draws,
     )
 
@@ -179,9 +194,11 @@ def _solve_upper_column(
     ar_draw_flow: float,
     ar_draw_stage: int,
     mix: Mixture,
+    ar_bottoms_recycle: "StreamSpec | None" = None,
 ) -> ColumnResult:
     upper_cfg = _build_upper_config(
-        cfg, lower_res, D_upper, ar_draw_flow, ar_draw_stage, mix
+        cfg, lower_res, D_upper, ar_draw_flow, ar_draw_stage, mix,
+        ar_bottoms_recycle=ar_bottoms_recycle,
     )
     return solve_bp_asu(upper_cfg, mix, max_iter=250, n_cmo_iter=100)
 
@@ -228,7 +245,7 @@ def _solve_argon_column(
         reflux_ratio=cfg.RR_argon,
         bottoms_rate=B_ar,
     )
-    return solve_bp(ar_cfg, mix, max_iter=200, n_cmo_iter=80)
+    return solve_bp(ar_cfg, mix, max_iter=400, n_cmo_iter=150)
 
 
 # ---------------------------------------------------------------------------
@@ -286,19 +303,34 @@ def solve_asu(cfg: ASUConfig, mix: Mixture) -> ASUResult:
     # ---- Step 3: MCHE outer iteration ----
     upper_res = upper_res0
     argon_res: ColumnResult | None = None
+    ar_bottoms_recycle: StreamSpec | None = None   # O2-rich bottoms recycled from Ar column
     n_outer = 0
     duty_imbalance = float("inf")
 
     for n_outer in range(1, cfg.max_outer_iter + 1):
-        # Solve upper column with Ar side draw
+        # Solve upper column with Ar side draw (+ recycle from Ar column on iter ≥ 2)
         upper_res = _solve_upper_column(
-            cfg, lower_res, D_upper, ar_draw_flow, ar_draw_stage, mix
+            cfg, lower_res, D_upper, ar_draw_flow, ar_draw_stage, mix,
+            ar_bottoms_recycle=ar_bottoms_recycle,
         )
 
-        # Solve argon column
+        # Solve argon column; extract O2-rich bottoms as recycle back to upper column
         if mix.n > 2 and ar_draw_flow > 0 and ar_draw_stage > 0:
             argon_res = _solve_argon_column(
                 cfg, upper_res, ar_draw_stage, ar_draw_flow, mix
+            )
+            # Recycle: nearly-pure O2 bottoms returns to upper column at side draw stage
+            D_ar_flow = ar_draw_flow * cfg.D_frac_argon
+            B_ar_flow = ar_draw_flow - D_ar_flow
+            z_ar_bot = np.clip(argon_res.x_bottoms.copy(), 0.0, 1.0)
+            if z_ar_bot.sum() > 1e-10:
+                z_ar_bot /= z_ar_bot.sum()
+            ar_bottoms_recycle = StreamSpec(
+                flow=B_ar_flow,
+                z=z_ar_bot,
+                T=float(argon_res.T[-1]),
+                P=cfg.P_upper,
+                phase="liquid",
             )
 
         # MCHE duty check
@@ -336,7 +368,10 @@ def solve_asu(cfg: ASUConfig, mix: Mixture) -> ASUResult:
 
     z_upper_bot = np.clip(upper_res.x_bottoms.copy(), 0.0, 1.0)
     z_upper_bot /= z_upper_bot.sum()
-    B_upper = cfg.air_flow - D_upper - ar_draw_flow
+    # Net O2 product = air in - N2 product - crude Ar product leaving the system
+    # (Ar column bottoms is recycled so only D_ar_product is a net loss)
+    D_ar_product = ar_draw_flow * cfg.D_frac_argon if ar_draw_flow > 0 else 0.0
+    B_upper = cfg.air_flow - D_upper - D_ar_product
     streams.upper_bottoms = StreamSpec(
         flow=max(B_upper, 0.0), z=z_upper_bot,
         T=float(upper_res.T[-1]), P=cfg.P_upper, phase="liquid"

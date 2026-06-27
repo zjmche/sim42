@@ -159,9 +159,9 @@ class ASUConfig:
     # ------------------------------------------------------------------
     # Argon column
     # ------------------------------------------------------------------
-    N_argon: int = 30          # equilibrium stages
-    RR_argon: float = 3.5      # reflux ratio
-    D_frac_argon: float = 0.90 # Ar distillate fraction of crude Ar feed
+    N_argon: int = 170          # equilibrium stages (Ar/O2 α≈1.07, needs many stages)
+    RR_argon: float = 5.0       # reflux ratio
+    D_frac_argon: float = 0.12  # crude Ar distillate fraction; feed is ~90% O2 so most goes to O2 bottoms
 
     # ------------------------------------------------------------------
     # Solver / MCHE coupling
