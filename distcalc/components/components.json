@@ -66,7 +66,7 @@
     }
   ],
   "Kij": {
-    "citation": "Binary interaction parameters for PR-EOS vdW one-fluid mixing rules. Fitted to cryogenic VLE data. k(N2,O2)=-0.0119 from Rowlinson (1969) adapted for PR; k(N2,Ar)=-0.0026, k(O2,Ar)=0.0104 consistent with Poling, Prausnitz, O'Connell, The Properties of Gases and Liquids 5th ed. (2001) App.B and multiple ASU simulation studies (e.g. Thorogood 1991, Xu et al. 2014).",
+    "citation": "Binary interaction parameters for PR-EOS vdW one-fluid mixing rules. Fitted to cryogenic VLE data. k(N2,O2)=-0.0119 from Rowlinson (1969) adapted for PR; k(N2,Ar)=-0.0026, k(O2,Ar)=0.0104 consistent with Poling, Prausnitz, O'Connell, The Properties of Gases and Liquids 5th ed. (2001) App.B and multiple ASU simulation studies (e.g. Thorogood 1991, Xu et al. 2014). Note: literature values cited for SRK-EOS (e.g. k_N2-Ar=-0.026) are NOT directly transferable to PR-EOS; the PR-EOS value -0.0026 was re-fitted to cryogenic N2/Ar VLE data by Thorogood (1991).",
     "names": ["N2", "O2", "Ar"],
     "matrix": [
       [ 0.0,    -0.0119, -0.0026],
