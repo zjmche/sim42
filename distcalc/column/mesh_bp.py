@@ -205,8 +205,14 @@ def _energy_balance(
 ) -> tuple[np.ndarray, np.ndarray, float, float]:
     """Top-down energy balance; returns (V_new, L_new, Q_cond, Q_reb).
 
-    Starting from the condenser, work downward:
-    For stage j: V[j+1] = (L[j]*H_L[j] + V[j]*H_V[j] − L[j-1]*H_L[j-1] − Q_j − H_F_j) / H_V[j+1]
+    Algebraically correct form: substitute total mass balance into the
+    adiabatic stage energy balance to eliminate circular dependence on L[j]:
+
+        V[j+1]*(H_V[j+1]-H_L[j])
+            = V[j]*(H_V[j]-H_L[j]) + L[j-1]*(H_L[j]-H_L[j-1]) + F_j*H_L[j] - HF_j
+
+    Denominator H_V[j+1]-H_L[j] ≈ latent heat (always > 0), so no
+    oscillation from stage-to-stage propagation.
     """
     N  = cfg.N_stages
     fs = cfg.feed.stage - 1
@@ -218,7 +224,6 @@ def _energy_balance(
     L_new = L.copy()
 
     # ---- Condenser duty ----
-    # Q_cond = V[1]*H_V[1] − (D+L[0])*H_L[0]  (heat removed, negative)
     if N > 1:
         Q_cond = V_new[1] * H_V[1] - (D + L_new[0]) * H_L[0]
     else:
@@ -226,28 +231,27 @@ def _energy_balance(
 
     # ---- Interior stages ----
     for j in range(1, N - 1):
-        F_j = cfg.feed.flow if j == fs else 0.0
-        HF_j = H_feed if j == fs else 0.0
-        Q_j = 0.0  # adiabatic intermediate stages
+        F_j  = cfg.feed.flow if j == fs else 0.0
+        HF_j = H_feed        if j == fs else 0.0
+
+        denom = H_V[j + 1] - H_L[j]
+        if abs(denom) < 200.0:
+            denom = max(H_V[j] - H_L[j], 200.0)
 
         numerator = (
-            L_new[j] * H_L[j]
-            + V_new[j] * H_V[j]
-            - L_new[j - 1] * H_L[j - 1]
+            V_new[j]       * (H_V[j]   - H_L[j])
+            + L_new[j - 1] * (H_L[j]   - H_L[j - 1])
+            + F_j          *  H_L[j]
             - HF_j
-            - Q_j
         )
-        if j + 1 <= N - 1 and abs(H_V[j + 1]) > 1.0:
-            V_new[j + 1] = numerator / H_V[j + 1]
-            # Clip to prevent runaway
-            V_new[j + 1] = max(V_new[j + 1], 0.05 * V[j + 1])
+        if j + 1 <= N - 1:
+            V_new[j + 1] = numerator / denom
+            V_new[j + 1] = max(V_new[j + 1], 0.05 * max(V[j + 1], 1e-6))
 
-        # Update L from total balance at stage j
         L_new[j] = V_new[j + 1] + L_new[j - 1] + F_j - V_new[j]
-        L_new[j] = max(L_new[j], 0.05 * L[j])
+        L_new[j] = max(L_new[j], 0.05 * max(L[j], 1e-6))
 
     # ---- Reboiler duty ----
-    # Q_reb = V[N-1]*H_V[N-1] + B*H_L[N-1] − L[N-2]*H_L[N-2]  (positive)
     if N > 1:
         Q_reb = V_new[N - 1] * H_V[N - 1] + B * H_L[N - 1] - L_new[N - 2] * H_L[N - 2]
     else:
