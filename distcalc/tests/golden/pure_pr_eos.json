@@ -1,25 +1,25 @@
 {
-  "_description": "Pure-component PR-EOS validation data. Z, ln(phi), H_departure computed by this implementation and cross-checked against analytic PR formulas. To validate against CoolProp PR backend, run scripts/compare_coolprop.py (requires CoolProp optional dependency).",
-  "_source": "distcalc PR-EOS engine v1.0.0, self-consistency tests",
-  "_note": "These values are from our own implementation. CoolProp PR-backend comparison is done separately in CI when CoolProp is available.",
+  "_description": "Pure-component PR-EOS validation data with Mathias-Copeman alpha (cryogenic-fitted). Z, ln(phi), H_departure computed by this implementation. mc_alpha coefficients fitted to NIST saturation data 60-130 K.",
+  "_source": "distcalc PR-EOS engine v1.1.0 with Mathias-Copeman alpha",
+  "_note": "Reference values regenerated after adding cryogenic MC alpha coefficients. To validate against CoolProp PR backend, run scripts/compare_coolprop.py (requires CoolProp optional dependency).",
   "cases": [
     {
       "component": "N2",
       "T_K": 90.0,
       "P_Pa": 300000.0,
       "phase": "vapor",
-      "Z": 0.91373,
-      "ln_phi": -0.08339,
-      "H_dep_J_per_mol": -162.88
+      "Z": 0.91323,
+      "ln_phi": -0.08384,
+      "H_dep_J_per_mol": -160.65
     },
     {
       "component": "N2",
       "T_K": 90.0,
       "P_Pa": 300000.0,
       "phase": "liquid",
-      "Z": 0.01348,
-      "ln_phi": 0.08307,
-      "H_dep_J_per_mol": -5248.96
+      "Z": 0.01344,
+      "ln_phi": 0.06235,
+      "H_dep_J_per_mol": -5136.15
     },
     {
       "component": "O2",
@@ -27,17 +27,17 @@
       "P_Pa": 200000.0,
       "phase": "liquid",
       "Z": 0.00628,
-      "ln_phi": 0.18454,
-      "H_dep_J_per_mol": -6589.30
+      "ln_phi": 0.16503,
+      "H_dep_J_per_mol": -6538.09
     },
     {
       "component": "Ar",
       "T_K": 120.0,
       "P_Pa": 1000000.0,
       "phase": "vapor",
-      "Z": 0.84346,
-      "ln_phi": -0.14727,
-      "H_dep_J_per_mol": -399.44
+      "Z": 0.84207,
+      "ln_phi": -0.14845,
+      "H_dep_J_per_mol": -403.67
     }
   ],
   "tolerance_Z": 0.0001,

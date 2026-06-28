@@ -38,11 +38,20 @@ def _kappa(omega: float) -> float:
 
 
 def _ai_vec(T: float, mix: Mixture) -> np.ndarray:
-    """aᵢ(T) for every component, shape (n,)."""
+    """aᵢ(T) for every component, shape (n,).
+
+    Uses Mathias-Copeman alpha α=[1+c1·x+c2·x²+c3·x³]² (x=1-√Tr) when
+    mc_alpha coefficients are present; falls back to standard Soave otherwise.
+    """
     out = np.empty(mix.n)
     for i, c in enumerate(mix.components):
-        kap = _kappa(c.omega)
-        sq = 1.0 + kap * (1.0 - (T / c.Tc) ** 0.5)
+        if c.mc_alpha is not None:
+            c1, c2, c3 = c.mc_alpha
+            x = 1.0 - (T / c.Tc) ** 0.5
+            sq = 1.0 + c1 * x + c2 * x**2 + c3 * x**3
+        else:
+            kap = _kappa(c.omega)
+            sq = 1.0 + kap * (1.0 - (T / c.Tc) ** 0.5)
         out[i] = 0.45724 * R**2 * c.Tc**2 / c.Pc * sq**2
     return out
 
@@ -55,13 +64,21 @@ def _bi_vec(mix: Mixture) -> np.ndarray:
 def _dai_dT_vec(T: float, mix: Mixture, a_vec: np.ndarray) -> np.ndarray:
     """d(aᵢ)/dT for every component, shape (n,).
 
-    From dαᵢ/dT = −κᵢ·√αᵢ / √(T·Tcᵢ)  →  daᵢ/dT = 0.45724·R²Tc²/Pc · dαᵢ/dT.
+    Standard Soave: da/dT = -a_crit · κ · √α / √(T·Tc)
+    Mathias-Copeman: same form but κ → (c1 + 2c2·x + 3c3·x²) and √α → f(x).
     """
     out = np.empty(mix.n)
     for i, c in enumerate(mix.components):
-        kap = _kappa(c.omega)
-        sq = 1.0 + kap * (1.0 - (T / c.Tc) ** 0.5)   # = √αᵢ
-        out[i] = -0.45724 * R**2 * c.Tc**2 / c.Pc * kap * sq / (T * c.Tc) ** 0.5
+        if c.mc_alpha is not None:
+            c1, c2, c3 = c.mc_alpha
+            x = 1.0 - (T / c.Tc) ** 0.5
+            sq = 1.0 + c1 * x + c2 * x**2 + c3 * x**3   # = √αᵢ
+            dsq_dx = c1 + 2.0 * c2 * x + 3.0 * c3 * x**2
+            out[i] = -0.45724 * R**2 * c.Tc**2 / c.Pc * sq * dsq_dx / (T * c.Tc) ** 0.5
+        else:
+            kap = _kappa(c.omega)
+            sq = 1.0 + kap * (1.0 - (T / c.Tc) ** 0.5)   # = √αᵢ
+            out[i] = -0.45724 * R**2 * c.Tc**2 / c.Pc * kap * sq / (T * c.Tc) ** 0.5
     return out
 
 

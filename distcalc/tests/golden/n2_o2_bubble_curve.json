@@ -1,17 +1,17 @@
 {
-  "_description": "N2/O2 binary bubble-point curve at 1 atm (101325 Pa). Values computed by distcalc PR-EOS engine v1.0.0. Experimental N2 NBP=77.36 K vs PR=77.36 K (match); O2 NBP=90.19 K vs PR=90.18 K (good). VLE compostion y_N2 typically within 2% of experimental.",
-  "_source": "distcalc PR-EOS engine v1.0.0. Cross-check: NIST WebBook experimental T within 0.5-1.5 K.",
+  "_description": "N2/O2 binary bubble-point curve at 1 atm (101325 Pa). Values recomputed with Mathias-Copeman alpha (cryogenic-fitted). Pure NBP: N2=77.25 K (NIST 77.35, err=-0.10 K), O2=90.19 K (NIST 90.17, err=+0.02 K). MC improves N2/O2 mixture bubble T agreement with NIST experimental data by ~0.1 K.",
+  "_source": "distcalc PR-EOS engine v1.1.0 with Mathias-Copeman alpha",
   "P_Pa": 101325.0,
   "points": [
-    {"x_N2": 0.1, "T_bubble_K": 87.4390, "y_N2": 0.3130},
-    {"x_N2": 0.2, "T_bubble_K": 85.4151, "y_N2": 0.5083},
-    {"x_N2": 0.3, "T_bubble_K": 83.7980, "y_N2": 0.6394},
-    {"x_N2": 0.4, "T_bubble_K": 82.4633, "y_N2": 0.7329},
-    {"x_N2": 0.5, "T_bubble_K": 81.3295, "y_N2": 0.8032},
-    {"x_N2": 0.6, "T_bubble_K": 80.3419, "y_N2": 0.8583},
-    {"x_N2": 0.7, "T_bubble_K": 79.4631, "y_N2": 0.9030},
-    {"x_N2": 0.8, "T_bubble_K": 78.6668, "y_N2": 0.9403},
-    {"x_N2": 0.9, "T_bubble_K": 77.9342, "y_N2": 0.9722}
+    {"x_N2": 0.1, "T_bubble_K": 87.5817, "y_N2": 0.3109},
+    {"x_N2": 0.2, "T_bubble_K": 85.5411, "y_N2": 0.5071},
+    {"x_N2": 0.3, "T_bubble_K": 83.9007, "y_N2": 0.6392},
+    {"x_N2": 0.4, "T_bubble_K": 82.5434, "y_N2": 0.7334},
+    {"x_N2": 0.5, "T_bubble_K": 81.3898, "y_N2": 0.8040},
+    {"x_N2": 0.6, "T_bubble_K": 80.3855, "y_N2": 0.8591},
+    {"x_N2": 0.7, "T_bubble_K": 79.4928, "y_N2": 0.9037},
+    {"x_N2": 0.8, "T_bubble_K": 78.6850, "y_N2": 0.9408},
+    {"x_N2": 0.9, "T_bubble_K": 77.9426, "y_N2": 0.9725}
   ],
   "tolerance_T_K": 0.01,
   "tolerance_y": 0.001

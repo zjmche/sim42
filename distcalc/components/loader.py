@@ -56,6 +56,7 @@ class ComponentRecord(BaseModel):
     Pc: float          # Pa
     omega: float
     shomate: list[ShomateCoeffs]
+    mc_alpha: list[float] | None = None  # Mathias-Copeman [c1, c2, c3]; None → standard Soave
 
     @field_validator("shomate")
     @classmethod
