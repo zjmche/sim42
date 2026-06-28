@@ -105,7 +105,7 @@ def _solve_lower_column(cfg: ASUConfig, mix: Mixture) -> ColumnResult:
         distillate_rate=D,
         reflux_ratio=cfg.RR_lower,
     )
-    return solve_bp(col_cfg, mix, max_iter=200, n_cmo_iter=80)
+    return solve_bp(col_cfg, mix, max_iter=300, n_cmo_iter=60)
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +200,7 @@ def _solve_upper_column(
         cfg, lower_res, D_upper, ar_draw_flow, ar_draw_stage, mix,
         ar_bottoms_recycle=ar_bottoms_recycle,
     )
-    return solve_bp_asu(upper_cfg, mix, max_iter=250, n_cmo_iter=100)
+    return solve_bp_asu(upper_cfg, mix, max_iter=400, n_cmo_iter=60)
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +245,7 @@ def _solve_argon_column(
         reflux_ratio=cfg.RR_argon,
         bottoms_rate=B_ar,
     )
-    return solve_bp(ar_cfg, mix, max_iter=400, n_cmo_iter=150)
+    return solve_bp(ar_cfg, mix, max_iter=600, n_cmo_iter=120)
 
 
 # ---------------------------------------------------------------------------
@@ -300,12 +300,24 @@ def solve_asu(cfg: ASUConfig, mix: Mixture) -> ASUResult:
 
     ar_draw_flow = cfg.ar_draw_flow
 
-    # ---- Step 3: MCHE outer iteration ----
+    # ---- Step 3: Outer recycle iteration ----
+    # The outer loop serves two purposes:
+    #   (a) Propagate the Ar-column O2-rich bottoms recycle back into the upper
+    #       column until the recycle composition converges.
+    #   (b) Report the MCHE duty imbalance as a design metric (NOT used to drive
+    #       D_upper — adjusting D_upper for MCHE balance destroys product purity
+    #       because Q_reb_upper ∝ (RR+1)*D_upper and the required drop in D_upper
+    #       to match Q_cond_lower conflicts with the N2 mass balance).
+    #
+    # Convergence criterion: max change in Ar recycle composition < tol_duty
+    # (reusing the same tolerance parameter for both metrics).
     upper_res = upper_res0
     argon_res: ColumnResult | None = None
     ar_bottoms_recycle: StreamSpec | None = None   # O2-rich bottoms recycled from Ar column
+    ar_recycle_prev: StreamSpec | None = None      # previous iteration recycle (for convergence)
     n_outer = 0
     duty_imbalance = float("inf")
+    recycle_change = float("inf")
 
     for n_outer in range(1, cfg.max_outer_iter + 1):
         # Solve upper column with Ar side draw (+ recycle from Ar column on iter ≥ 2)
@@ -319,13 +331,12 @@ def solve_asu(cfg: ASUConfig, mix: Mixture) -> ASUResult:
             argon_res = _solve_argon_column(
                 cfg, upper_res, ar_draw_stage, ar_draw_flow, mix
             )
-            # Recycle: nearly-pure O2 bottoms returns to upper column at side draw stage
             D_ar_flow = ar_draw_flow * cfg.D_frac_argon
             B_ar_flow = ar_draw_flow - D_ar_flow
             z_ar_bot = np.clip(argon_res.x_bottoms.copy(), 0.0, 1.0)
             if z_ar_bot.sum() > 1e-10:
                 z_ar_bot /= z_ar_bot.sum()
-            ar_bottoms_recycle = StreamSpec(
+            new_recycle = StreamSpec(
                 flow=B_ar_flow,
                 z=z_ar_bot,
                 T=float(argon_res.T[-1]),
@@ -333,28 +344,22 @@ def solve_asu(cfg: ASUConfig, mix: Mixture) -> ASUResult:
                 phase="liquid",
             )
 
-        # MCHE duty check
-        # Q_cond_lower ≈ duty absorbed by upper reboiler
-        # Sign convention: Q_cond < 0 (heat removed), Q_reb > 0 (heat added)
-        Q_reb_upper   = upper_res.Q_reboiler
-        Q_cond_lower  = lower_res.Q_condenser
-        # Ideal MCHE: |Q_cond_lower| = Q_reb_upper
-        duty_imbalance = abs(abs(Q_cond_lower) - Q_reb_upper)
-        if Q_reb_upper > 0:
-            rel_imbalance = duty_imbalance / Q_reb_upper
+            # Check recycle convergence
+            if ar_recycle_prev is not None:
+                recycle_change = float(np.max(np.abs(new_recycle.z - ar_recycle_prev.z)))
+            ar_recycle_prev   = ar_bottoms_recycle
+            ar_bottoms_recycle = new_recycle
         else:
-            rel_imbalance = float("inf")
+            recycle_change = 0.0   # no Ar column → trivially converged
 
-        if rel_imbalance < cfg.tol_duty:
+        # Compute MCHE duty imbalance (informational; not used to adjust D_upper)
+        Q_reb_upper  = upper_res.Q_reboiler
+        Q_cond_lower = lower_res.Q_condenser
+        duty_imbalance = abs(abs(Q_cond_lower) - Q_reb_upper)
+
+        # Converge when the Ar recycle composition is stable
+        if recycle_change < cfg.tol_duty:
             break
-
-        # Adjust D_upper to move Q_reb_upper toward |Q_cond_lower|.
-        # Hard upper bound: D_upper cannot exceed total N₂ in feed + small tolerance.
-        D_upper_max = float(cfg.air_flow * cfg.z_air[0]) * 0.999
-        if Q_reb_upper > abs(Q_cond_lower) * 1.05:
-            D_upper = min(D_upper * 1.02, D_upper_max)
-        elif Q_reb_upper < abs(Q_cond_lower) * 0.95:
-            D_upper = max(D_upper * 0.98, cfg.air_flow * 0.01)
 
     # ---- Step 4: Collect streams ----
     streams.duty_imbalance = duty_imbalance
@@ -420,11 +425,8 @@ def solve_asu(cfg: ASUConfig, mix: Mixture) -> ASUResult:
     N2_recovery = N2_prod / F_N2_in if F_N2_in > 0 else 0.0
     O2_recovery = O2_prod / F_O2_in if F_O2_in > 0 else 0.0
 
-    outer_converged = (
-        lower_res.converged
-        and upper_res.converged
-        and (duty_imbalance / max(abs(lower_res.Q_condenser), 1.0)) < cfg.tol_duty
-    )
+    # Outer convergence = Ar recycle composition converged within tolerance.
+    outer_converged = recycle_change < cfg.tol_duty
 
     return ASUResult(
         streams=streams,

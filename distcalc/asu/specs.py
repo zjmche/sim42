@@ -166,7 +166,7 @@ class ASUConfig:
     # ------------------------------------------------------------------
     # Solver / MCHE coupling
     # ------------------------------------------------------------------
-    max_outer_iter: int = 15   # outer MCHE coupling iterations
+    max_outer_iter: int = 30   # outer MCHE coupling iterations
     tol_duty: float = 0.02     # relative duty imbalance tolerance
 
     def __post_init__(self) -> None:
