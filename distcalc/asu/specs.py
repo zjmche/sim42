@@ -16,7 +16,15 @@ from ..column.specs import ColumnResult, FeedSpec
 
 @dataclass
 class SideDraw:
-    """Liquid side draw from a single column stage."""
+    """Side draw from a single column stage.
+
+    phase="liquid" draws at the stage liquid composition x[j] and is
+    subtracted from the descending L profile (as before).
+    phase="vapor" draws at the stage vapor composition y[j] and is
+    subtracted from the *ascending* V profile instead — used e.g. for a
+    "waste GAN" (gaseous nitrogen) vent a few stages below the top of the
+    upper column, distinct from the high-purity N2 distillate.
+    """
     stage: int      # 1-based stage index
     flow: float     # molar flow rate [mol/s]
     phase: str = "liquid"
@@ -147,7 +155,7 @@ class ASUConfig:
     P_upper: float = 1.3e5    # LP column pressure [Pa]
     N_upper: int = 40         # equilibrium stages (more for high purity)
     RR_upper: float = 3.0     # reflux ratio
-    D_frac_upper: float = 0.78  # N₂ distillate fraction of TOTAL upper feed
+    D_frac_upper: float = 0.65  # high-purity N₂ distillate fraction of TOTAL upper feed
     # Feed stage placement (1-based)
     n2_feed_stage_upper: int = 2    # liquid N₂ from lower distillate enters near top
     co2_feed_stage_upper: int = 0   # crude O₂ from lower bottoms (0 → auto: 2/3 from top)
@@ -155,6 +163,20 @@ class ASUConfig:
     # Argon side draw
     ar_draw_flow: float = 0.0       # mol/s (0 → auto-estimated from Ar balance)
     ar_draw_stage: int = 0          # 1-based (0 → auto: stage of max Ar concentration)
+
+    # ------------------------------------------------------------------
+    # Waste GAN (gaseous nitrogen) vent — second, lower-purity N₂ product
+    # ------------------------------------------------------------------
+    # Real double-column ASUs withdraw a second nitrogen stream as VAPOR a
+    # few stages below the high-purity top product. This relieves the
+    # rectifying section above the Ar peak from having to drive N2 recovery
+    # to ~100%, which otherwise pushes N2 down into the Ar side-draw region.
+    # The waste GAN is vented to atmosphere via the main heat exchanger
+    # (regenerating the air dryer mol-sieve beds and, in older plants,
+    # cooling DCAC water) rather than sold as product.
+    waste_gan_stage: int = 0        # 1-based (0 → auto: a few stages below top)
+    waste_gan_flow: float = 0.0     # mol/s (0 → auto: fraction of upper feed)
+    waste_gan_frac: float = 0.13    # used only when waste_gan_flow == 0
 
     # ------------------------------------------------------------------
     # Argon column
@@ -180,11 +202,24 @@ class ASUConfig:
             self.co2_feed_stage_upper = max(2, int(self.N_upper * 2 // 3))
 
         if self.ar_draw_flow == 0.0:
-            # Estimate: all Ar in feed goes to side draw at ~90% purity
+            # Estimate: draw enough crude side-draw flow to capture ~all the
+            # feed Ar, given the draw point sits at the real-plant Ar-peak
+            # composition (~90% O2 / ~10% Ar / trace N2) rather than at
+            # high purity — the crude Ar column then refines this further,
+            # capping overall Ar recovery well below 100%.
             if len(self.z_air) > 2 and self.z_air[2] > 0:
-                self.ar_draw_flow = float(self.air_flow * self.z_air[2] / 0.90)
+                self.ar_draw_flow = float(self.air_flow * self.z_air[2] / 0.10)
             else:
                 self.ar_draw_flow = 0.0
+
+        if self.waste_gan_stage == 0:
+            # Default: a few stages below the high-purity N2 top product,
+            # above the Ar-peak region — typical industrial placement.
+            self.waste_gan_stage = max(2, min(self.N_upper // 8, 6))
+
+        if self.waste_gan_flow == 0.0 and self.waste_gan_frac > 0.0:
+            total_upper_feed = self.air_flow  # ~equal to total upper feed (N2+crude O2 from lower col)
+            self.waste_gan_flow = float(total_upper_feed * self.waste_gan_frac)
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +241,7 @@ class ASUStreams:
     upper_distillate: Optional[StreamSpec] = None   # pure N₂ product
     upper_bottoms: Optional[StreamSpec] = None      # pure O₂ product
     upper_ar_draw: Optional[StreamSpec] = None      # crude Ar side draw
+    waste_gan: Optional[StreamSpec] = None          # vented low-purity N₂ (vapor)
 
     # Argon column outputs
     ar_distillate: Optional[StreamSpec] = None      # pure / crude Ar product
@@ -238,6 +274,7 @@ class ASUResult:
 
     N2_recovery: float = 0.0    # fraction of feed N₂ in N₂ product
     O2_recovery: float = 0.0    # fraction of feed O₂ in O₂ product
+    Ar_recovery: float = 0.0    # fraction of feed Ar in Ar column distillate
 
     def summary(self) -> str:
         lines = [
@@ -254,7 +291,10 @@ class ASUResult:
             "",
             f"  N₂ recovery : {self.N2_recovery*100:.1f}%",
             f"  O₂ recovery : {self.O2_recovery*100:.1f}%",
+            f"  Ar recovery : {self.Ar_recovery*100:.1f}%",
         ]
+        if self.streams.waste_gan:
+            lines.append(f"  Waste GAN   : {self.streams.waste_gan!r}")
         if self.streams.Q_mche:
             lines.append(f"  MCHE duty   : {self.streams.Q_mche/1e3:.1f} kW")
         if self.lower_col:

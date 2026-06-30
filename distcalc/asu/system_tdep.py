@@ -120,6 +120,8 @@ def _build_upper_config(
     ar_draw_stage: int,
     mix: MixtureTD,
     ar_bottoms_recycle: "StreamSpec | None" = None,
+    waste_gan_stage: int = 0,
+    waste_gan_flow: float = 0.0,
 ) -> MultiColumnConfig:
     """Build the MultiColumnConfig for the LP upper column."""
     N  = cfg.N_upper
@@ -167,11 +169,13 @@ def _build_upper_config(
         )
         feeds.append(feed_recycle)
 
-    side_draws = (
-        [SideDraw(stage=ar_draw_stage, flow=ar_draw_flow)]
-        if ar_draw_flow > 0 and ar_draw_stage > 0
-        else []
-    )
+    side_draws: list[SideDraw] = []
+    if ar_draw_flow > 0 and ar_draw_stage > 0:
+        side_draws.append(SideDraw(stage=ar_draw_stage, flow=ar_draw_flow))
+    if waste_gan_flow > 0 and waste_gan_stage > 0:
+        # Vapor draw: vents a lower-purity N2 stream a few stages below the
+        # top, distinct from the high-purity N2 distillate (phase="vapor").
+        side_draws.append(SideDraw(stage=waste_gan_stage, flow=waste_gan_flow, phase="vapor"))
 
     # B is auto-computed from mass balance: total_feed - D_upper - side_draw_total
     # When recycle is included: B = air_flow + B_ar - D_upper - ar_draw_flow
@@ -195,10 +199,13 @@ def _solve_upper_column(
     ar_draw_stage: int,
     mix: MixtureTD,
     ar_bottoms_recycle: "StreamSpec | None" = None,
+    waste_gan_stage: int = 0,
+    waste_gan_flow: float = 0.0,
 ) -> ColumnResult:
     upper_cfg = _build_upper_config(
         cfg, lower_res, D_upper, ar_draw_flow, ar_draw_stage, mix,
         ar_bottoms_recycle=ar_bottoms_recycle,
+        waste_gan_stage=waste_gan_stage, waste_gan_flow=waste_gan_flow,
     )
     return solve_bp_asu(upper_cfg, mix, max_iter=400, n_cmo_iter=60)
 
@@ -285,10 +292,16 @@ def solve_asu(cfg: ASUConfig, mix: MixtureTD) -> ASUResult:
     Q_mche_target = -lower_res.Q_condenser   # >0 (heat released by HP N₂ condensation)
     streams.Q_mche = Q_mche_target
 
-    # ---- Step 2: Upper column — pilot solve (no side draw) ----
+    # ---- Step 2: Upper column — pilot solve (waste GAN, no Ar side draw yet) ----
+    # Waste GAN vents a lower-purity N2 stream a few stages below the top so
+    # the rectifying section isn't forced toward ~100% N2 recovery, which
+    # would otherwise push N2 contamination down into the Ar-peak region.
     D_upper = cfg.air_flow * cfg.D_frac_upper
+    waste_gan_stage = cfg.waste_gan_stage
+    waste_gan_flow = cfg.waste_gan_flow
     upper_res0 = _solve_upper_column(
-        cfg, lower_res, D_upper, 0.0, 0, mix
+        cfg, lower_res, D_upper, 0.0, 0, mix,
+        waste_gan_stage=waste_gan_stage, waste_gan_flow=waste_gan_flow,
     )
 
     # Locate argon peak stage
@@ -320,10 +333,11 @@ def solve_asu(cfg: ASUConfig, mix: MixtureTD) -> ASUResult:
     recycle_change = float("inf")
 
     for n_outer in range(1, cfg.max_outer_iter + 1):
-        # Solve upper column with Ar side draw (+ recycle from Ar column on iter ≥ 2)
+        # Solve upper column with Ar + waste GAN side draws (+ recycle from Ar column on iter ≥ 2)
         upper_res = _solve_upper_column(
             cfg, lower_res, D_upper, ar_draw_flow, ar_draw_stage, mix,
             ar_bottoms_recycle=ar_bottoms_recycle,
+            waste_gan_stage=waste_gan_stage, waste_gan_flow=waste_gan_flow,
         )
 
         # Solve argon column; extract O2-rich bottoms as recycle back to upper column
@@ -373,10 +387,10 @@ def solve_asu(cfg: ASUConfig, mix: MixtureTD) -> ASUResult:
 
     z_upper_bot = np.clip(upper_res.x_bottoms.copy(), 0.0, 1.0)
     z_upper_bot /= z_upper_bot.sum()
-    # Net O2 product = air in - N2 product - crude Ar product leaving the system
+    # Net O2 product = air in - N2 product - waste GAN - crude Ar product leaving the system
     # (Ar column bottoms is recycled so only D_ar_product is a net loss)
     D_ar_product = ar_draw_flow * cfg.D_frac_argon if ar_draw_flow > 0 else 0.0
-    B_upper = cfg.air_flow - D_upper - D_ar_product
+    B_upper = cfg.air_flow - D_upper - waste_gan_flow - D_ar_product
     streams.upper_bottoms = StreamSpec(
         flow=max(B_upper, 0.0), z=z_upper_bot,
         T=float(upper_res.T[-1]), P=cfg.P_upper, phase="liquid"
@@ -391,8 +405,17 @@ def solve_asu(cfg: ASUConfig, mix: MixtureTD) -> ASUResult:
             T=float(upper_res.T[j_ar]), P=cfg.P_upper, phase="liquid"
         )
 
+    if waste_gan_stage > 0 and waste_gan_flow > 0 and waste_gan_stage <= upper_res.y.shape[1]:
+        j_wg = waste_gan_stage - 1
+        z_wg = np.clip(upper_res.y[:, j_wg].copy(), 0.0, 1.0)
+        z_wg /= z_wg.sum()
+        streams.waste_gan = StreamSpec(
+            flow=waste_gan_flow, z=z_wg,
+            T=float(upper_res.T[j_wg]), P=cfg.P_upper, phase="vapor"
+        )
+
     if argon_res is not None:
-        D_ar = cfg.air_flow * cfg.z_air[2] / 0.90 * cfg.D_frac_argon  # rough
+        D_ar = D_ar_product
         z_ar_top = np.clip(argon_res.x_distillate.copy(), 0.0, 1.0)
         z_ar_top /= z_ar_top.sum()
         streams.ar_distillate = StreamSpec(
@@ -425,6 +448,12 @@ def solve_asu(cfg: ASUConfig, mix: MixtureTD) -> ASUResult:
     N2_recovery = N2_prod / F_N2_in if F_N2_in > 0 else 0.0
     O2_recovery = O2_prod / F_O2_in if F_O2_in > 0 else 0.0
 
+    Ar_recovery = 0.0
+    if argon_res is not None and mix.n > ar_idx2 and cfg.z_air[ar_idx2] > 0:
+        F_Ar_in = float(cfg.air_flow * cfg.z_air[ar_idx2])
+        Ar_prod = D_ar_product * Ar_purity
+        Ar_recovery = Ar_prod / F_Ar_in if F_Ar_in > 0 else 0.0
+
     # Outer convergence = Ar recycle composition converged within tolerance.
     outer_converged = recycle_change < cfg.tol_duty
 
@@ -441,4 +470,5 @@ def solve_asu(cfg: ASUConfig, mix: MixtureTD) -> ASUResult:
         Ar_purity=Ar_purity,
         N2_recovery=N2_recovery,
         O2_recovery=O2_recovery,
+        Ar_recovery=Ar_recovery,
     )

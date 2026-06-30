@@ -65,9 +65,13 @@ def _initialize_multi(cfg: MultiColumnConfig, mix: MixtureTD):
 
     # Sort feeds top-to-bottom (0-based stage index ascending)
     feeds_sorted = sorted(cfg.feeds, key=lambda f: f.stage)
-    sd_by_stage: dict[int, float] = {}
+    sd_by_stage: dict[int, float] = {}   # liquid side draws
+    vd_by_stage: dict[int, float] = {}   # vapor side draws (e.g. waste GAN)
     for sd in cfg.side_draws:
-        sd_by_stage[sd.stage - 1] = sd_by_stage.get(sd.stage - 1, 0.0) + sd.flow
+        if sd.phase == "vapor":
+            vd_by_stage[sd.stage - 1] = vd_by_stage.get(sd.stage - 1, 0.0) + sd.flow
+        else:
+            sd_by_stage[sd.stage - 1] = sd_by_stage.get(sd.stage - 1, 0.0) + sd.flow
 
     # ---- Build L profile (CMO-like, top to bottom) ----
     L = np.zeros(N)
@@ -86,7 +90,7 @@ def _initialize_multi(cfg: MultiColumnConfig, mix: MixtureTD):
     L[N - 1] = B  # enforce bottoms at reboiler
 
     # ---- Build V profile (top-down total balance) ----
-    # V[j] = vapor leaving stage j upward
+    # V[j] = TOTAL vapor generated at stage j (continuing-up + any vapor draw)
     V = np.zeros(N)
     # V[0] = 0 for total condenser
     # V[1] = (RR+1)*D  (vapor from stage 1 into condenser)
@@ -97,7 +101,12 @@ def _initialize_multi(cfg: MultiColumnConfig, mix: MixtureTD):
     for j in range(1, N - 1):
         F_j  = sum(f.flow for f in feeds_sorted if f.stage - 1 == j)
         S_j  = sd_by_stage.get(j, 0.0)
-        V_next = V_val + L[j] + S_j - L_prev - F_j
+        # V_val is TOTAL vapor at stage j (already includes any draw at j);
+        # solving for V_up arriving at j-1, then add back the draw at j+1
+        # to store TOTAL vapor generated at j+1.
+        V_up_next = V_val + L[j] + S_j - L_prev - F_j
+        W_next = vd_by_stage.get(j + 1, 0.0)
+        V_next = V_up_next + W_next
         V[j + 1] = max(V_next, 1e-6)
         V_val = V[j + 1]
         L_prev = L[j]
@@ -141,7 +150,8 @@ def _build_tridiag_asu(
     K_i: np.ndarray,
     cfg: MultiColumnConfig,
     z_i_by_stage: dict[int, float],  # stage_j (0-based) → Σ Fk*zk_i
-    sd_flow: np.ndarray,             # shape (N,) side draw flow at each stage
+    sd_flow: np.ndarray,             # shape (N,) liquid side draw flow at each stage
+    vd_flow: np.ndarray,             # shape (N,) vapor side draw flow at each stage
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build banded (3×N) matrix and RHS for one component.
 
@@ -150,6 +160,13 @@ def _build_tridiag_asu(
     z_i_by_stage : mapping from 0-based stage index j to total feed source
                    term Σ_k F_k * z_k_i  for feeds on that stage.
     sd_flow      : liquid side draw flow at each stage [mol/s], shape (N,).
+    vd_flow      : vapor side draw flow at each stage [mol/s], shape (N,).
+                   A vapor draw at stage j removes vd_flow[j] of the V[j]
+                   vapor (composition y[j]) before it continues up into
+                   stage j-1, so only (V[j]-vd_flow[j]) arrives there. The
+                   stage-j component balance itself is unaffected since the
+                   total vapor leaving stage j (draw + continuing) is still
+                   V[j]·K[j]·x[j] regardless of how it's split.
     """
     N = cfg.N_stages
     D = cfg.D
@@ -167,9 +184,10 @@ def _build_tridiag_asu(
         else:
             ab[1, j] = V[j] * K_i[j] + L[j] + sd_flow[j]
 
-        # Superdiagonal c[j] = −V[j+1]·K[j+1]
+        # Superdiagonal c[j] = −(V[j+1]-vd_flow[j+1])·K[j+1]  (vapor arriving
+        # at row j is only what's left after the vapor draw at j+1)
         if j < N - 1:
-            ab[0, j + 1] = -V[j + 1] * K_i[j + 1]
+            ab[0, j + 1] = -(V[j + 1] - vd_flow[j + 1]) * K_i[j + 1]
 
         # Subdiagonal a[j] = −L[j-1]  (net L, no side draw)
         if j > 0:
@@ -189,6 +207,7 @@ def _solve_component_balances_asu(
     cfg: MultiColumnConfig,
     n_comp: int,
     sd_flow: np.ndarray,
+    vd_flow: np.ndarray,
 ) -> np.ndarray:
     """Solve tridiagonal per component. Returns x: shape (n_comp, N)."""
     N = cfg.N_stages
@@ -202,7 +221,7 @@ def _solve_component_balances_asu(
             j = f.stage - 1
             z_i_by_stage[j] = z_i_by_stage.get(j, 0.0) + f.flow * float(f.z[i])
 
-        ab, rhs = _build_tridiag_asu(V, L, K[i, :], cfg, z_i_by_stage, sd_flow)
+        ab, rhs = _build_tridiag_asu(V, L, K[i, :], cfg, z_i_by_stage, sd_flow, vd_flow)
         try:
             x[i, :] = solve_banded((1, 1), ab, rhs)
         except Exception:
@@ -222,16 +241,24 @@ def _energy_balance_asu(
     cfg: MultiColumnConfig,
     mix: MixtureTD,
     sd_flow: np.ndarray,
+    vd_flow: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, float, float]:
     """Top-down energy balance for multi-feed + side-draw column.
 
     Derives V[j+1] by substituting the total mass balance into the adiabatic
     stage energy balance, eliminating the circular dependence on L[j]:
 
-        V[j+1]*(H_V[j+1] - H_L[j])
+        V_up[j+1]*(H_V[j+1] - H_L[j])
             = V[j]*(H_V[j] - H_L[j])
               + L[j-1]*(H_L[j] - H_L[j-1])
               + F_j*H_L[j] - HF_j
+
+    where V[j] is the TOTAL vapor generated at stage j (continuing-up +
+    any vapor side draw at j) and V_up[j+1] is the vapor that actually
+    arrives at stage j from below (i.e. V[j+1] minus any vapor draw at
+    j+1). The vapor array V_new stores the TOTAL at each stage (V_up plus
+    the draw added back), consistent with its use in the component
+    balance and K-value weighting elsewhere.
 
     Denominator H_V[j+1]-H_L[j] ≈ latent heat (always > 0 for boiling
     mixtures), so no oscillation can arise from this formula.
@@ -262,6 +289,7 @@ def _energy_balance_asu(
         HF_j = feed_H.get(j, 0.0)
         F_j  = feed_F.get(j, 0.0)
         S_j  = float(sd_flow[j])
+        W_j1 = float(vd_flow[j + 1])  # vapor draw AT stage j+1
 
         # Denominator = latent heat at stage j evaluated between j+1 and j.
         # Always positive for vapour/liquid cryogenic systems.
@@ -276,11 +304,13 @@ def _energy_balance_asu(
             + F_j          *  H_L[j]
             - HF_j
         )
-        V_new[j + 1] = numerator / denom
-        V_new[j + 1] = max(V_new[j + 1], 0.05 * max(V[j + 1], 1e-6))
+        V_up_j1 = numerator / denom
+        V_up_j1 = max(V_up_j1, 0.05 * max(V[j + 1] - vd_flow[j + 1], 1e-6))
+        V_new[j + 1] = V_up_j1 + W_j1   # store TOTAL vapor generated at j+1
 
-        # L[j] from total mass balance (no circular dependency)
-        L_new[j] = V_new[j + 1] + L_new[j - 1] + F_j - V_new[j] - S_j
+        # L[j] from total mass balance (no circular dependency); uses
+        # V_up_j1 (vapor actually arriving from below), not the total.
+        L_new[j] = V_up_j1 + L_new[j - 1] + F_j - V_new[j] - S_j
         L_new[j] = max(L_new[j], 0.05 * max(L[j], 1e-6))
 
     if N > 1:
@@ -384,11 +414,15 @@ def solve_bp_asu(
     N = cfg.N_stages
     n = mix.n
 
-    # Side draw flow array (0-indexed)
+    # Side draw flow arrays (0-indexed): liquid (sd_flow) and vapor (vd_flow)
     sd_flow = np.zeros(N)
+    vd_flow = np.zeros(N)
     for sd in cfg.side_draws:
         if 1 <= sd.stage <= N:
-            sd_flow[sd.stage - 1] += sd.flow
+            if sd.phase == "vapor":
+                vd_flow[sd.stage - 1] += sd.flow
+            else:
+                sd_flow[sd.stage - 1] += sd.flow
 
     T, V, L, K, x, y = _initialize_multi(cfg, mix)
     V_ref = V.copy()
@@ -420,7 +454,7 @@ def solve_bp_asu(
         x_old = x.copy()
 
         # Step A: tridiagonal material balance → x
-        x_new = _solve_component_balances_asu(V, L, K, cfg, n, sd_flow)
+        x_new = _solve_component_balances_asu(V, L, K, cfg, n, sd_flow, vd_flow)
         x_new = np.maximum(x_new, _XMIN)
         col_sums = x_new.sum(axis=0)
         col_sums = np.where(col_sums > 0, col_sums, 1.0)
@@ -453,7 +487,7 @@ def solve_bp_asu(
 
         # Step E: algebraically correct energy balance
         V_new, L_new, Q_cond, Q_reb = _energy_balance_asu(
-            V, L, H_L, H_V, cfg, mix, sd_flow
+            V, L, H_L, H_V, cfg, mix, sd_flow, vd_flow
         )
 
         if n_iter > n_cmo_iter:
