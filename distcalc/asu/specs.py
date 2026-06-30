@@ -192,12 +192,17 @@ class ASUConfig:
     # Argon column
     # ------------------------------------------------------------------
     N_argon: int = 170          # equilibrium stages (Ar/O2 α≈1.07, needs many stages)
-    RR_argon: float = 5.0       # reflux ratio
-    # Crude Ar distillate fraction. The crude side-draw feed is only ~8% Ar
-    # (the rest O2 + trace N2, per the waste-GAN-corrected upper column), so
-    # a high distillate fraction can't reach high purity (mass balance caps
-    # purity at ~z_Ar_feed/D_frac_argon). D_frac_argon well below z_Ar_feed
-    # is needed to concentrate the dilute Ar into a ~97%+ purity cut.
+    # Reflux ratio. With the N2-ppm-targeted side-draw stage (see
+    # ar_draw_n2_ppm_target above), the crude Ar feed lands richer in Ar
+    # (~17% vs the ~8% feed this was originally tuned against), but the
+    # Ar/O2 cut still needs much more internal reflux than that to reach
+    # high purity — RR=5 only reached ~53% Ar in the distillate against
+    # this feed; RR=20 reaches ~98%.
+    RR_argon: float = 20.0      # reflux ratio
+    # Crude Ar distillate fraction. A high distillate fraction can't reach
+    # high purity (mass balance caps purity at ~z_Ar_feed/D_frac_argon).
+    # D_frac_argon well below z_Ar_feed is needed to concentrate the dilute
+    # Ar into a ~97%+ purity cut.
     D_frac_argon: float = 0.07
 
     # ------------------------------------------------------------------
