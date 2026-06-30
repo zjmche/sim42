@@ -183,7 +183,12 @@ class ASUConfig:
     # ------------------------------------------------------------------
     N_argon: int = 170          # equilibrium stages (Ar/O2 α≈1.07, needs many stages)
     RR_argon: float = 5.0       # reflux ratio
-    D_frac_argon: float = 0.12  # crude Ar distillate fraction; feed is ~90% O2 so most goes to O2 bottoms
+    # Crude Ar distillate fraction. The crude side-draw feed is only ~8% Ar
+    # (the rest O2 + trace N2, per the waste-GAN-corrected upper column), so
+    # a high distillate fraction can't reach high purity (mass balance caps
+    # purity at ~z_Ar_feed/D_frac_argon). D_frac_argon well below z_Ar_feed
+    # is needed to concentrate the dilute Ar into a ~97%+ purity cut.
+    D_frac_argon: float = 0.07
 
     # ------------------------------------------------------------------
     # Solver / MCHE coupling
