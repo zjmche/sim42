@@ -578,3 +578,31 @@ def find_ar_draw_stage(x: np.ndarray, n2_idx: int = 0, ar_idx: int = 2,
     if below.size == 0:
         return int(np.argmin(n2_frac)) + 1
     return int(below[0]) + 1
+
+
+def find_ar_draw_stage_near(x: np.ndarray, center_stage: int, n2_idx: int = 0,
+                             ar_idx: int = 2, n2_ppm_target: float = 150.0,
+                             window: int = 6) -> int:
+    """Re-evaluate the Ar draw stage within a bounded window of the current
+    estimate, picking the stage whose N2 level is closest (in log space) to
+    the ppm target.
+
+    Used to correct the draw stage after the side draw is actually
+    extracted (which shifts the column profile from the zero-extraction
+    pilot estimate). A naive "first stage at/below target" re-scan over the
+    *whole* column can jump straight past the Ar concentration peak when
+    the post-extraction N2 profile has a steep rejection cliff (adjacent
+    stages dropping from thousands of ppm to sub-ppm), landing on a stage
+    whose Ar/O2 split no longer resembles a real Ar-column feed. Searching
+    only nearby stages and minimizing distance-to-target (rather than
+    requiring strictly below it) keeps the correction local and stays close
+    to the intended draw region.
+    """
+    n_stages = x.shape[1]
+    lo = max(0, center_stage - 1 - window)
+    hi = min(n_stages, center_stage - 1 + window + 1)
+    candidates = np.arange(lo, hi)
+    n2_frac = np.clip(x[n2_idx, candidates], 1e-12, None)
+    target = n2_ppm_target * 1e-6
+    best = candidates[int(np.argmin(np.abs(np.log(n2_frac) - np.log(target))))]
+    return int(best) + 1

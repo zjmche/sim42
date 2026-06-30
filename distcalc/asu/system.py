@@ -16,7 +16,7 @@ import numpy as np
 from ..column.specs import FeedSpec, ColumnResult
 from ..components.loader import Mixture
 from ..equilibrium.bubble_dew import bubble_T as _bubble_T
-from .mesh_asu import find_ar_draw_stage, solve_bp_asu
+from .mesh_asu import find_ar_draw_stage, find_ar_draw_stage_near, solve_bp_asu
 from .specs import (
     ASUConfig,
     ASUResult,
@@ -350,13 +350,15 @@ def solve_asu(cfg: ASUConfig, mix: Mixture) -> ASUResult:
         # profile. Actually pulling ar_draw_flow out of the column reduces
         # the descending L below the draw point, which can leave the
         # originally-picked stage above the target N2 ppm. Re-evaluate
-        # against the post-extraction profile and move the draw deeper if
-        # needed, re-solving until the stage stabilizes (bounded retries so
-        # this can't outrun the outer recycle loop).
+        # within a bounded window of the current stage (a global re-scan can
+        # jump straight past the Ar peak across a steep N2 cliff — see
+        # find_ar_draw_stage_near docstring) and re-solve until the stage
+        # stabilizes (bounded retries so this can't outrun the outer
+        # recycle loop).
         if mix.n > 2 and ar_draw_flow > 0:
             for _ in range(5):
-                corrected_stage = find_ar_draw_stage(
-                    upper_res.x, n2_idx=n2_idx, ar_idx=ar_idx,
+                corrected_stage = find_ar_draw_stage_near(
+                    upper_res.x, ar_draw_stage, n2_idx=n2_idx, ar_idx=ar_idx,
                     n2_ppm_target=cfg.ar_draw_n2_ppm_target,
                 )
                 if corrected_stage == ar_draw_stage:
