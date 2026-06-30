@@ -16,7 +16,7 @@ import numpy as np
 from ..column.specs import FeedSpec, ColumnResult
 from ..components.loader_tdep import MixtureTD
 from ..equilibrium.bubble_dew_tdep import bubble_T as _bubble_T
-from .mesh_asu_tdep import find_ar_peak_stage, solve_bp_asu
+from .mesh_asu_tdep import find_ar_draw_stage, solve_bp_asu
 from .specs import (
     ASUConfig,
     ASUResult,
@@ -304,10 +304,16 @@ def solve_asu(cfg: ASUConfig, mix: MixtureTD) -> ASUResult:
         waste_gan_stage=waste_gan_stage, waste_gan_flow=waste_gan_flow,
     )
 
-    # Locate argon peak stage
+    # Locate Ar side-draw stage: shallowest point where N2 has rectified
+    # out to the target trace level (NOT the Ar-concentration peak — see
+    # find_ar_draw_stage docstring).
     ar_idx = 2  # Ar is the third component [N2, O2, Ar]
+    n2_idx = 0
     if mix.n > 2:
-        ar_draw_stage = find_ar_peak_stage(upper_res0.x, ar_idx=ar_idx)
+        ar_draw_stage = find_ar_draw_stage(
+            upper_res0.x, n2_idx=n2_idx, ar_idx=ar_idx,
+            n2_ppm_target=cfg.ar_draw_n2_ppm_target,
+        )
     else:
         ar_draw_stage = cfg.N_upper // 2
 
@@ -339,6 +345,28 @@ def solve_asu(cfg: ASUConfig, mix: MixtureTD) -> ASUResult:
             ar_bottoms_recycle=ar_bottoms_recycle,
             waste_gan_stage=waste_gan_stage, waste_gan_flow=waste_gan_flow,
         )
+
+        # The draw stage was first picked from a zero-extraction pilot
+        # profile. Actually pulling ar_draw_flow out of the column reduces
+        # the descending L below the draw point, which can leave the
+        # originally-picked stage above the target N2 ppm. Re-evaluate
+        # against the post-extraction profile and move the draw deeper if
+        # needed, re-solving until the stage stabilizes (bounded retries so
+        # this can't outrun the outer recycle loop).
+        if mix.n > 2 and ar_draw_flow > 0:
+            for _ in range(5):
+                corrected_stage = find_ar_draw_stage(
+                    upper_res.x, n2_idx=n2_idx, ar_idx=ar_idx,
+                    n2_ppm_target=cfg.ar_draw_n2_ppm_target,
+                )
+                if corrected_stage == ar_draw_stage:
+                    break
+                ar_draw_stage = corrected_stage
+                upper_res = _solve_upper_column(
+                    cfg, lower_res, D_upper, ar_draw_flow, ar_draw_stage, mix,
+                    ar_bottoms_recycle=ar_bottoms_recycle,
+                    waste_gan_stage=waste_gan_stage, waste_gan_flow=waste_gan_flow,
+                )
 
         # Solve argon column; extract O2-rich bottoms as recycle back to upper column
         if mix.n > 2 and ar_draw_flow > 0 and ar_draw_stage > 0:

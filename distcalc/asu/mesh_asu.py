@@ -557,3 +557,24 @@ def solve_bp_asu(
 def find_ar_peak_stage(x: np.ndarray, ar_idx: int = 2) -> int:
     """Return 1-based stage index where component ar_idx peaks in liquid."""
     return int(np.argmax(x[ar_idx, :])) + 1
+
+
+def find_ar_draw_stage(x: np.ndarray, n2_idx: int = 0, ar_idx: int = 2,
+                        n2_ppm_target: float = 150.0) -> int:
+    """Return the 1-based stage for the crude Ar side draw.
+
+    Real plants do NOT draw at the stage of maximum Ar concentration —
+    the N2 there is still far too high (N2 is the most volatile of the
+    three and only fully rejects a few stages further down, past the Ar
+    peak). Instead the draw is placed at the shallowest stage where N2
+    has dropped to a trace level (~100-200 ppm), accepting a somewhat
+    lower Ar fraction in exchange for an acceptably N2-free crude feed
+    to the Ar column. Falls back to the most N2-depleted stage if the
+    column never reaches the target (too few stages).
+    """
+    n2_frac = x[n2_idx, :]
+    target = n2_ppm_target * 1e-6
+    below = np.where(n2_frac <= target)[0]
+    if below.size == 0:
+        return int(np.argmin(n2_frac)) + 1
+    return int(below[0]) + 1

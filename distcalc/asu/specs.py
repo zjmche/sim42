@@ -153,7 +153,11 @@ class ASUConfig:
     # Upper column (LP)
     # ------------------------------------------------------------------
     P_upper: float = 1.3e5    # LP column pressure [Pa]
-    N_upper: int = 40         # equilibrium stages (more for high purity)
+    # Equilibrium stages. Real LP columns run ~60-100 trays; this needs to be
+    # high enough that the rectifying section below the crude-O2 feed can
+    # strip N2 down to trace (~ppm) levels before the Ar side draw, which a
+    # 40-stage column cannot do (see ar_draw_n2_ppm_target below).
+    N_upper: int = 60
     RR_upper: float = 3.0     # reflux ratio
     D_frac_upper: float = 0.65  # high-purity N₂ distillate fraction of TOTAL upper feed
     # Feed stage placement (1-based)
@@ -162,7 +166,13 @@ class ASUConfig:
 
     # Argon side draw
     ar_draw_flow: float = 0.0       # mol/s (0 → auto-estimated from Ar balance)
-    ar_draw_stage: int = 0          # 1-based (0 → auto: stage of max Ar concentration)
+    ar_draw_stage: int = 0          # 1-based (0 → auto: see ar_draw_n2_ppm_target)
+    # The draw stage is NOT the stage of maximum Ar concentration — N2 there
+    # is still far too contaminated. Real plants draw a few stages further
+    # down, where N2 has rectified out to a trace level, accepting a lower
+    # Ar fraction in trade. Auto-stage picks the shallowest stage where the
+    # liquid N2 mole fraction first drops to/below this ppm target.
+    ar_draw_n2_ppm_target: float = 150.0
 
     # ------------------------------------------------------------------
     # Waste GAN (gaseous nitrogen) vent — second, lower-purity N₂ product
