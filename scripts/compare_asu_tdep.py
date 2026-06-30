@@ -33,7 +33,7 @@ def _row(label: str, a, b, fmt: str = "{:.4f}") -> str:
 
 
 def main() -> None:
-    cfg = ASUConfig()  # defaults: N_argon=170, RR_argon=5.0, D_frac_argon=0.12
+    cfg = ASUConfig()  # defaults: N_argon=170, RR_argon=5.0, D_frac_argon=0.07
 
     print("=" * 70)
     print("  ASU system: original PR-EOS vs T-dependent (Kij(T)) PR-EOS")
