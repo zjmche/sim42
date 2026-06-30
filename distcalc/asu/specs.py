@@ -192,18 +192,19 @@ class ASUConfig:
     # Argon column
     # ------------------------------------------------------------------
     N_argon: int = 170          # equilibrium stages (Ar/O2 α≈1.07, needs many stages)
-    # Reflux ratio. With the N2-ppm-targeted side-draw stage (see
-    # ar_draw_n2_ppm_target above), the crude Ar feed lands richer in Ar
-    # (~17% vs the ~8% feed this was originally tuned against), but the
-    # Ar/O2 cut still needs much more internal reflux than that to reach
-    # high purity — RR=5 only reached ~53% Ar in the distillate against
-    # this feed; RR=20 reaches ~98%.
-    RR_argon: float = 20.0      # reflux ratio
+    # Reflux ratio. The crude Ar feed composition is coupled to RR_argon via
+    # the Ar-column-bottoms recycle back into the upper column, so this
+    # can't be tuned against a fixed feed in isolation. RR=5 (original
+    # tuning) reached only ~53% Ar purity once the N2-ppm-targeted draw
+    # stage was added; RR=30 with D_frac_argon=0.05 below reaches ~99%+
+    # purity against the converged feed composition.
+    RR_argon: float = 30.0      # reflux ratio
     # Crude Ar distillate fraction. A high distillate fraction can't reach
-    # high purity (mass balance caps purity at ~z_Ar_feed/D_frac_argon).
-    # D_frac_argon well below z_Ar_feed is needed to concentrate the dilute
-    # Ar into a ~97%+ purity cut.
-    D_frac_argon: float = 0.07
+    # high purity (mass balance caps purity at ~z_Ar_feed/D_frac_argon), and
+    # also pulls overall Ar recovery up toward/above the real-plant ~60%
+    # ceiling. 0.05 keeps recovery comfortably under that ceiling while
+    # RR_argon=30 still drives the distillate to ~99%+ Ar purity.
+    D_frac_argon: float = 0.05
 
     # ------------------------------------------------------------------
     # Solver / MCHE coupling
