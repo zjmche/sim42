@@ -474,7 +474,17 @@ def solve_asu(cfg: ASUConfig, mix: MixtureTD) -> ASUResult:
     F_N2_in = float(cfg.air_flow * cfg.z_air[n2_idx])
     F_O2_in = float(cfg.air_flow * cfg.z_air[o2_idx])
     N2_prod  = D_upper * N2_purity
-    O2_prod  = max(B_upper, 0.0) * O2_purity
+    # Use the system-level O2 balance (air O2 minus O2 leaving in all other
+    # exit streams) rather than B_upper * O2_purity. B_upper * O2_purity can
+    # exceed F_O2_in when the outer recycle loop has a one-iteration lag in
+    # the Ar-bottoms composition — a tol_duty=2% mismatch in a 93%-O2
+    # recycle stream shifts ~0.002 mol/s of O2, enough to push apparent
+    # O2_recovery above 100%. The system balance is always ≤ 100% by
+    # construction: all O2 in the product came from the air feed.
+    O2_in_n2_dist = D_upper * float(z_upper_dist[o2_idx])
+    O2_in_wg  = waste_gan_flow * float(streams.waste_gan.z[o2_idx]) if streams.waste_gan else 0.0
+    O2_in_ard = D_ar_product * float(streams.ar_distillate.z[o2_idx]) if streams.ar_distillate else 0.0
+    O2_prod   = max(F_O2_in - O2_in_n2_dist - O2_in_wg - O2_in_ard, 0.0)
     N2_recovery = N2_prod / F_N2_in if F_N2_in > 0 else 0.0
     O2_recovery = O2_prod / F_O2_in if F_O2_in > 0 else 0.0
 
